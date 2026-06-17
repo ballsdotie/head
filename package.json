@@ -1,0 +1,8 @@
+{
+  "name": "balls-headline-optimiser",
+  "version": "1.0.0",
+  "description": "Balls.ie Headline Optimiser — Netlify deployment",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.0"
+  }
+}
