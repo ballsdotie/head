@@ -285,6 +285,33 @@
     header h1 { border: none; padding: 0; }
     .mode-tab { font-size: 13px; }
   }
+
+  /* Bookmarklet banner */
+  .bm-banner {
+    background: #1a1a2e; color: #e2e8f0; font-size: 13px;
+    padding: 10px 20px; display: flex; align-items: center; gap: 12px;
+    justify-content: center; flex-wrap: wrap;
+  }
+  .bm-banner span { opacity: 0.7; }
+  .bm-link {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #7ed957; color: #1a1a1a; font-weight: 800;
+    padding: 5px 14px; border-radius: 20px; text-decoration: none;
+    font-size: 13px; cursor: grab; white-space: nowrap;
+    border: 2px dashed transparent; transition: border-color 0.2s;
+  }
+  .bm-link:hover { border-color: #fff; }
+  .bm-install-tip {
+    background: #0f3460; border: 1.5px solid #7ed957; border-radius: 6px;
+    padding: 4px 10px; font-size: 12px; color: #7ed957; white-space: nowrap;
+  }
+
+  /* Pre-filled notice */
+  .prefilled-notice {
+    background: #e8f5e9; border: 1.5px solid #4caf50; border-radius: 8px;
+    padding: 10px 16px; margin-bottom: 16px; font-size: 13px; color: #1b5e20;
+    display: flex; align-items: center; gap: 8px;
+  }
 </style>
 </head>
 <body>
@@ -293,6 +320,13 @@
   <div class="logo">balls<span>.</span>ie</div>
   <h1>Article Optimiser</h1>
 </header>
+
+<div class="bm-banner">
+  <span>⚡ Fastest way to use this tool:</span>
+  <a class="bm-link" id="bm-install" href="#">🔖 Balls Optimiser</a>
+  <span class="bm-install-tip">← Drag this to your bookmarks bar</span>
+  <span style="opacity:0.5">· then click it on any WordPress article</span>
+</div>
 
 <div class="container">
 
@@ -358,6 +392,10 @@
   <div id="mode-manual" style="display:none;">
     <div class="card">
       <div class="card-title">Article Details</div>
+
+      <div class="prefilled-notice" id="prefilled-notice" style="display:none;">
+        ✅ <strong>Fields pre-filled from WordPress.</strong> Review, adjust sport if needed, then hit Optimise.
+      </div>
 
       <div class="form-group">
         <label for="headline">Article Headline <span class="label-hint">(H1 on the page)</span></label>
@@ -867,6 +905,76 @@ function esc(str) {
   if (str == null) return '';
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+
+// ─── Bookmarklet setup ────────────────────────────────────────────────────────
+(function setupBookmarklet() {
+  const OPTIMISER_URL = window.location.origin + window.location.pathname;
+
+  // The bookmarklet code — runs on the WordPress page
+  const bookmarkletCode = `javascript:(function(){
+var e=!!document.querySelector('.block-editor-page, .block-editor');
+var t='',s='',m='',b='',h=0;
+if(e){
+  var tEl=document.querySelector('.wp-block-post-title,[aria-label="Add title"],.editor-post-title__input');
+  t=(tEl?.innerText||tEl?.value||'').trim();
+  var cEl=document.querySelector('.is-root-container,.editor-styles-wrapper');
+  b=cEl?cEl.innerText.trim():'';
+  h=document.querySelectorAll('.is-root-container h2,.is-root-container h3,.editor-styles-wrapper h2,.editor-styles-wrapper h3').length;
+  var yoastPanel=document.querySelector('#yoast-snippet-editor-title,#focus-keyword-input-metabox');
+  s=(yoastPanel?.value||document.querySelector('[class*="yst"] input[id*="title"],[id*="wpseo_title"]')?.value||'').trim();
+  var yoastDesc=document.querySelector('#yoast-snippet-editor-description,[id*="wpseo_metadesc"],[class*="yst"] textarea[id*="description"]');
+  m=(yoastDesc?.value||'').trim();
+}else{
+  t=(document.querySelector('#title')?.value||'').trim();
+  try{if(window.tinyMCE&&tinyMCE.activeEditor)b=tinyMCE.activeEditor.getContent({format:'text'});}catch(x){}
+  b=b||document.querySelector('#content')?.value||'';
+  h=(b.match(/<h[23]/gi)||[]).length;
+  s=(document.querySelector('#yoast_wpseo_title')?.value||'').trim();
+  m=(document.querySelector('#yoast_wpseo_metadesc')?.value||'').trim();
+}
+var p=new URLSearchParams({headline:t,seoTitle:s,metaDesc:m,body:b.slice(0,3000),subheadings:h,from:'bookmarklet'});
+window.open('${OPTIMISER_URL}?'+p.toString(),'_blank');
+})();`.replace(/\n/g,'');
+
+  const bmLink = document.getElementById('bm-install');
+  if (bmLink) bmLink.href = bookmarkletCode;
+})();
+
+// ─── URL param pre-fill (from bookmarklet) ────────────────────────────────────
+(function readParams() {
+  const p = new URLSearchParams(window.location.search);
+  if (p.get('from') !== 'bookmarklet') return;
+
+  switchMode('manual');
+  document.getElementById('prefilled-notice').style.display = 'flex';
+
+  const headline = p.get('headline') || '';
+  const seoTitle = p.get('seoTitle') || '';
+  const metaDesc = p.get('metaDesc') || '';
+  const body = p.get('body') || '';
+  const subheadings = parseInt(p.get('subheadings')) || 0;
+
+  if (headline) document.getElementById('headline').value = headline;
+
+  if (seoTitle) {
+    seoInput.value = seoTitle;
+    updateCount(seoInput, document.getElementById('seo-count'), 50, 60);
+  }
+
+  if (metaDesc) {
+    metaInput.value = metaDesc;
+    updateCount(metaInput, document.getElementById('meta-count'), 150, 160);
+  }
+
+  if (body) {
+    const bodyEl = document.getElementById('article-body');
+    bodyEl.value = body;
+    updateArticleStats();
+  }
+
+  // Clean up URL without reloading
+  window.history.replaceState({}, '', window.location.pathname);
+})();
 </script>
 </body>
 </html>
