@@ -476,9 +476,10 @@
 
 <script>
 // ─── Claude API wrapper ───────────────────────────────────────────────────────
-async function askClaude(prompt, image) {
+async function askClaude(prompt, image, model) {
   const body = { prompt };
   if (image) body.image = image;
+  if (model) body.model = model;
 
   const res = await fetch('/.netlify/functions/claude', {
     method: 'POST',
@@ -615,7 +616,7 @@ async function runScreenshotAnalysis() {
 {"headline":null,"seoTitle":null,"metaDescription":null,"articleText":null,"namedEntities":[],"wordCountEstimate":null,"subheadingCount":null,"hasRelatedBlock":null,"hasIntroDeck":null}
 Rules: wordCountEstimate=integer word count estimate or null. subheadingCount=count of H2/H3 subheadings or null. hasRelatedBlock=true/false/null. hasIntroDeck=true if there is a standfirst/deck line under the H1, false if not, null if unclear.`;
 
-    const extracted = parseResponse(await askClaude(extractPrompt, { data: currentImageBase64, mediaType: currentImageMime }));
+    const extracted = parseResponse(await askClaude(extractPrompt, { data: currentImageBase64, mediaType: currentImageMime }, 'claude-sonnet-4-6'));
 
     document.getElementById('loading-step').textContent = 'Step 2 of 2 — generating optimised headlines…';
     const optimisePrompt = buildOptimiserPrompt({
@@ -623,7 +624,7 @@ Rules: wordCountEstimate=integer word count estimate or null. subheadingCount=co
       headline: extracted.headline || '',
       seoTitle: extracted.seoTitle || '',
       metaDesc: extracted.metaDescription || '',
-      context: [extracted.articleText, (extracted.namedEntities || []).join(', ')].filter(Boolean).join('\n').slice(0, 800),
+      context: [extracted.articleText, (extracted.namedEntities || []).join(', ')].filter(Boolean).join('\n').slice(0, 3000),
       wordCount: extracted.wordCountEstimate || null,
       subheadings: extracted.subheadingCount,
       hasRelated: extracted.hasRelatedBlock,
@@ -651,7 +652,7 @@ async function runManualOptimiser() {
 
   const prompt = buildOptimiserPrompt({
     sport, isBreaking, headline, seoTitle, metaDesc,
-    context: bodyText.slice(0, 800),
+    context: bodyText.slice(0, 3000),
     wordCount: wordCount || null, subheadings, hasRelated, hasIntroDeck: null,
   });
 
@@ -912,28 +913,56 @@ function esc(str) {
 
   // The bookmarklet code — runs on the WordPress page
   const bookmarkletCode = `javascript:(function(){
-var e=!!document.querySelector('.block-editor-page, .block-editor');
-var t='',s='',m='',b='',h=0;
-if(e){
-  var tEl=document.querySelector('.wp-block-post-title,[aria-label="Add title"],.editor-post-title__input');
-  t=(tEl?.innerText||tEl?.value||'').trim();
-  var cEl=document.querySelector('.is-root-container,.editor-styles-wrapper');
-  b=cEl?cEl.innerText.trim():'';
-  h=document.querySelectorAll('.is-root-container h2,.is-root-container h3,.editor-styles-wrapper h2,.editor-styles-wrapper h3').length;
-  var yoastPanel=document.querySelector('#yoast-snippet-editor-title,#focus-keyword-input-metabox');
-  s=(yoastPanel?.value||document.querySelector('[class*="yst"] input[id*="title"],[id*="wpseo_title"]')?.value||'').trim();
-  var yoastDesc=document.querySelector('#yoast-snippet-editor-description,[id*="wpseo_metadesc"],[class*="yst"] textarea[id*="description"]');
-  m=(yoastDesc?.value||'').trim();
-}else{
-  t=(document.querySelector('#title')?.value||'').trim();
-  try{if(window.tinyMCE&&tinyMCE.activeEditor)b=tinyMCE.activeEditor.getContent({format:'text'});}catch(x){}
-  b=b||document.querySelector('#content')?.value||'';
-  h=(b.match(/<h[23]/gi)||[]).length;
-  s=(document.querySelector('#yoast_wpseo_title')?.value||'').trim();
-  m=(document.querySelector('#yoast_wpseo_metadesc')?.value||'').trim();
+var qs=new URLSearchParams(window.location.search);
+var postId=qs.get('post')||qs.get('postId');
+var postType=qs.get('postType')||'posts';
+if(!postId){alert('Open this bookmarklet on a WordPress article edit page.');return;}
+var origin=window.location.origin;
+var DEST='${OPTIMISER_URL}';
+function send(t,s,m,b,h){
+  var p=new URLSearchParams({headline:t,seoTitle:s,metaDesc:m,body:b.slice(0,3000),subheadings:h,from:'bookmarklet'});
+  window.open(DEST+'?'+p.toString(),'_blank');
 }
-var p=new URLSearchParams({headline:t,seoTitle:s,metaDesc:m,body:b.slice(0,3000),subheadings:h,from:'bookmarklet'});
-window.open('${OPTIMISER_URL}?'+p.toString(),'_blank');
+function domYoast(){
+  var s=(document.querySelector('#yoast_wpseo_title,[name="yoast_wpseo_title"]')?.value||'').trim();
+  var m=(document.querySelector('#yoast_wpseo_metadesc,[name="yoast_wpseo_metadesc"]')?.value||'').trim();
+  return{s:s,m:m};
+}
+function domFallback(){
+  var isGB=!!document.querySelector('.block-editor');
+  var t='',s='',m='',b='',h=0;
+  var iDoc=(document.querySelector('iframe[name="editor-canvas"]')||{}).contentDocument||document;
+  if(isGB){
+    var tEl=iDoc.querySelector('.wp-block-post-title')||document.querySelector('[aria-label="Add title"],.editor-post-title__input');
+    t=(tEl?.innerText||tEl?.value||'').trim();
+    var ps=iDoc.querySelectorAll('p,h2,h3,h4,li,blockquote');
+    b=Array.from(ps).map(function(el){return el.innerText||'';}).join(' ').trim();
+    h=iDoc.querySelectorAll('h2,h3').length;
+  }else{
+    t=(document.querySelector('#title')?.value||'').trim();
+    try{if(window.tinyMCE&&tinyMCE.activeEditor)b=tinyMCE.activeEditor.getContent({format:'text'});}catch(x){}
+    b=b||document.querySelector('#content')?.value||'';
+    h=(b.match(/<h[23]/gi)||[]).length;
+  }
+  var y=domYoast();s=y.s;m=y.m;
+  send(t,s,m,b,h);
+}
+fetch(origin+'/wp-json/wp/v2/'+postType+'/'+postId+'?context=edit',{credentials:'include'})
+  .then(function(r){return r.ok?r.json():Promise.reject(r.status);})
+  .then(function(d){
+    var t=d.title?d.title.raw:'';
+    var tmp=document.createElement('div');
+    tmp.innerHTML=d.content?d.content.raw:'';
+    var b=(tmp.innerText||tmp.textContent||'').trim();
+    var h=tmp.querySelectorAll('h2,h3').length;
+    var s='',m='';
+    if(d.yoast_head_json){s=d.yoast_head_json.title||'';m=d.yoast_head_json.description||'';}
+    if(!s)s=d.yoast_title||'';
+    if(!m)m=d.yoast_metadesc||'';
+    if(!s||!m){var y=domYoast();if(!s)s=y.s;if(!m)m=y.m;}
+    send(t,s,m,b,h);
+  })
+  .catch(function(){domFallback();});
 })();`.replace(/\n/g,'');
 
   const bmLink = document.getElementById('bm-install');
